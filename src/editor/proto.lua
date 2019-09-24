@@ -48,7 +48,7 @@ ide.proto.Document = {__index = {
     if ide.config.editor.showtabtooltip and ide:IsValidProperty(notebook, "SetPageToolTip") then
       notebook:SetPageToolTip(index, self:GetFilePath() or text or self:GetTabText())
     end
-    if ide.config.editor.showtabicon then
+    if ide.config.editor.showtabicon and ide:IsValidProperty(notebook, "GetImageList") then
       if not notebook:GetImageList() then
         notebook:SetImageList(ide:GetProjectTree():GetImageList())
       end
