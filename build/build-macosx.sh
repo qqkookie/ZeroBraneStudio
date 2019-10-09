@@ -13,9 +13,9 @@ BIN_DIR="$(dirname "$PWD")/bin"
 INSTALL_DIR="$PWD/deps"
 
 # Mac OS X global settings
-MACOSX_ARCH="i386"
-MACOSX_VERSION="10.6"
-MACOSX_SDK_PATH="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.7.sdk"
+MACOSX_ARCH="x86_64"
+MACOSX_VERSION="10.9"
+MACOSX_SDK_PATH="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.9.sdk"
 
 # number of parallel jobs used for building
 MAKEFLAGS="-j4"
@@ -26,7 +26,7 @@ if [ -d "$MACOSX_SDK_PATH" ]; then
   echo "Building with $MACOSX_SDK_PATH"
   MACOSX_FLAGS="$MACOSX_FLAGS -isysroot $MACOSX_SDK_PATH"
 fi
-BUILD_FLAGS="-O2 -arch x86_64 -dynamiclib -undefined dynamic_lookup $MACOSX_FLAGS -I $INSTALL_DIR/include -L $INSTALL_DIR/lib"
+BUILD_FLAGS="-Os -dynamiclib -undefined dynamic_lookup $MACOSX_FLAGS -I $INSTALL_DIR/include -L $INSTALL_DIR/lib"
 
 # paths configuration
 WXWIDGETS_BASENAME="wxWidgets"
@@ -195,7 +195,7 @@ if [ $BUILD_LUA ]; then
   cd "$LUA_BASENAME"
 
   if [ $BUILD_JIT ]; then
-    make BUILDMODE=dynamic LUAJIT_SO=liblua.dylib TARGET_DYLIBPATH=liblua.dylib CC="gcc -m32" CCOPT="$MACOSX_FLAGS -DLUAJIT_ENABLE_LUA52COMPAT" || { echo "Error: failed to build Lua"; exit 1; }
+    make BUILDMODE=dynamic LUAJIT_SO=liblua.dylib MACOSX_DEPLOYMENT_TARGET=$MACOSX_VERSION TARGET_DYLIBPATH=liblua.dylib CC="gcc" CCOPT="$MACOSX_FLAGS -DLUAJIT_ENABLE_LUA52COMPAT" || { echo "Error: failed to build Lua"; exit 1; }
     make install PREFIX="$INSTALL_DIR"
     cp "src/luajit" "$INSTALL_DIR/bin/lua"
     cp "src/liblua.dylib" "$INSTALL_DIR/lib"
@@ -212,6 +212,11 @@ if [ $BUILD_LUA ]; then
     mv "$INSTALL_DIR/bin/lua" "$INSTALL_DIR/bin/lua$LUAS"
     cp src/liblua$LUAS.dylib "$INSTALL_DIR/lib"
   fi
+
+  install_name_tool -change liblua$LUAS.dylib @rpath/liblua$LUAS.dylib "$INSTALL_DIR/bin/lua$LUAS"
+  install_name_tool -add_rpath @executable_path/../../.. "$INSTALL_DIR/bin/lua$LUAS"
+  install_name_tool -add_rpath @executable_path/. "$INSTALL_DIR/bin/lua$LUAS"
+
   [ $DEBUGBUILD ] || strip -u -r "$INSTALL_DIR/bin/lua$LUAS"
   [ -f "$INSTALL_DIR/lib/liblua$LUAS.dylib" ] || { echo "Error: liblua$LUAS.dylib isn't found"; exit 1; }
   cd ..
@@ -252,7 +257,7 @@ if [ $BUILD_WXWIDGETS ]; then
   cd "$WXWIDGETS_BASENAME"
 
   # checkout the version that was used in wxwidgets upgrade to 3.1.x
-  git checkout WX_3_1_0-7d9d59
+  git checkout master
 
   # refresh wxwidgets submodules
   git submodule update --init --recursive
@@ -262,18 +267,22 @@ if [ $BUILD_WXWIDGETS ]; then
     MINSDK="--with-macosx-sdk=$MACOSX_SDK_PATH"
   fi
   ./configure --prefix="$INSTALL_DIR" $WXWIDGETSDEBUG --disable-shared --enable-unicode \
-    --enable-compat28 \
-    --with-libjpeg=builtin --with-libpng=builtin --with-libtiff=no --with-expat=no \
+    --enable-compat30 \
+    --enable-privatefonts \
+    --with-cxx=11 \
+    --with-libjpeg=builtin --with-libpng=builtin --with-libtiff=builtin --with-expat=builtin \
     --with-zlib=builtin --disable-richtext \
     --enable-macosx_arch=$MACOSX_ARCH --with-macosx-version-min=$MACOSX_VERSION $MINSDK \
     --with-osx_cocoa CFLAGS="-Os" CXXFLAGS="-Os"
 
-  PATTERN="defined( __WXMAC__ )\$"
-  if [ "$(grep -c "$PATTERN" src/aui/tabart.cpp)" -ne "1" ]; then
+  PATTERN="defined( __WXMAC__ )"
+  if [ ! "$(sed -n "/$PATTERN/{N;/$PATTERN\n static/p;}" src/aui/tabart.cpp)" ]; then
     echo "Incorrect pattern for a fix in tabart.cpp."
     exit 1
   fi
-  sed -i "" "s/$PATTERN/0/" src/aui/tabart.cpp
+  REPLACEMENT='0\
+ static'
+  sed -i "" "/$PATTERN/{N;s/$PATTERN\n static/$REPLACEMENT/;}" src/aui/tabart.cpp
 
   make $MAKEFLAGS || { echo "Error: failed to build wxWidgets"; exit 1; }
   make install
@@ -283,29 +292,24 @@ fi
 
 # build wxLua
 if [ $BUILD_WXLUA ]; then
-  git clone "$WXLUA_URL" "$WXLUA_BASENAME" || { echo "Error: failed to get wxWidgets"; exit 1; }
+  git clone "$WXLUA_URL" "$WXLUA_BASENAME" || { echo "Error: failed to get wxlua"; exit 1; }
   cd "$WXLUA_BASENAME/wxLua"
 
-  # checkout the version that matches what was used in wxwidgets upgrade to 3.1.x
-  git checkout WX_3_1_0-7d9d59
+  git checkout master
 
   MINSDK=""
   if [ -d $MACOSX_SDK_PATH ]; then
     MINSDK="CMAKE_OSX_SYSROOT=$MACOSX_SDK_PATH"
   fi
-  # the following patches wxlua source to fix live coding support in wxlua apps
-  # http://www.mail-archive.com/wxlua-users@lists.sourceforge.net/msg03225.html
-  sed -i "" 's/\(m_wxlState = wxLuaState(wxlState.GetLuaState(), wxLUASTATE_GETSTATE|wxLUASTATE_ROOTSTATE);\)/\/\/ removed by ZBS build process \/\/ \1/' modules/wxlua/wxlcallb.cpp
 
-  # remove "Unable to call an unknown method..." error as it leads to a leak
-  # see http://sourceforge.net/p/wxlua/mailman/message/34629522/ for details
-  sed -i "" -e '/Unable to call an unknown method/{N' -e 's/.*/    \/\/ removed by ZBS build process/' -e '}' modules/wxlua/wxlbind.cpp
-
+  echo 'set_target_properties(wxLuaModule PROPERTIES LINK_FLAGS "-undefined dynamic_lookup -image_base 100000000")' >> modules/luamodule/CMakeLists.txt
   cmake -G "Unix Makefiles" -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" -DCMAKE_BUILD_TYPE=$WXLUABUILD -DBUILD_SHARED_LIBS=FALSE \
     -DCMAKE_OSX_ARCHITECTURES=$MACOSX_ARCH -DCMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_VERSION $MINSDK \
     -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DwxWidgets_CONFIG_EXECUTABLE="$INSTALL_DIR/bin/wx-config" \
-    -DwxWidgets_COMPONENTS="stc;gl;html;aui;adv;core;net;base" \
-    -DwxLuaBind_COMPONENTS="stc;gl;html;aui;adv;core;net;base" -DwxLua_LUA_LIBRARY_USE_BUILTIN=FALSE \
+    -DCMAKE_CXX_FLAGS="-std=c++11 -stdlib=libc++" \
+    -DwxWidgets_COMPONENTS="xrc;xml;stc;gl;html;aui;adv;core;net;base" \
+    -DwxLuaBind_COMPONENTS="xrc;xml;stc;gl;html;aui;adv;core;net;base" \
+    -DwxLua_LUA_LIBRARY_USE_BUILTIN=FALSE \
     -DwxLua_LUA_INCLUDE_DIR="$INSTALL_DIR/include" -DwxLua_LUA_LIBRARY="$INSTALL_DIR/lib/liblua.dylib" .
   (cd modules/luamodule; make $MAKEFLAGS) || { echo "Error: failed to build wxLua"; exit 1; }
   (cd modules/luamodule; make install)

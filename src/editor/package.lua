@@ -508,7 +508,7 @@ local rawMethods = {"AddTextDyn", "InsertTextDyn", "AppendTextDyn", "SetTextDyn"
 local useraw = nil
 
 local invalidUTF8, invalidLength
-local suffix = "\1\0"
+local suffix = "\0"
 local DF_TEXT = wx.wxDataFormat(wx.wxDF_TEXT)
 
 function ide:CreateStyledTextCtrl(...)
@@ -529,6 +529,14 @@ function ide:CreateStyledTextCtrl(...)
     end
   end
 
+  -- `AppendTextRaw` and `AddTextRaw` methods may accept the length of text,
+  -- which is important for appending binary strings that may include zeros.
+  -- Add text length when it's not provided.
+  for _, m in ipairs(useraw and {"AppendTextRaw", "AddTextRaw"} or {}) do
+    local orig = editor[m]
+    editor[m] = function(self, text, length) return orig(self, text, length or #text) end
+  end
+
   -- map all `GetTextDyn` to `GetText` or `GetTextRaw` if `*Raw` methods are present
   editor.useraw = useraw
   for _, m in ipairs(rawMethods) do
@@ -545,7 +553,7 @@ function ide:CreateStyledTextCtrl(...)
     local text = self:GetSelectedTextRaw()
     if text == "" or wx.wxString.FromUTF8(text) ~= "" then return self:Copy() end
     local tdo = wx.wxTextDataObject()
-    -- append suffix as wxwidgets (3.1+ on Windows) truncate last char for odd-length strings
+    -- append suffix as wxwidgets (3.1+ on Windows) truncates last char for odd-length strings
     local workaround = ide.osname == "Windows" and (#text % 2 > 0) and suffix or ""
     tdo:SetData(DF_TEXT, text..workaround)
     invalidUTF8, invalidLength = text, tdo:GetDataSize()
@@ -565,7 +573,7 @@ function ide:CreateStyledTextCtrl(...)
     clip:Close()
     local ok, text = tdo:GetDataHere(DF_TEXT)
     -- check if the fragment being pasted is a valid UTF-8 sequence
-    if ide.osname == "Windows" then text = text and text:gsub(suffix.."+$","") end
+    if ide.osname == "Windows" then text = text and text:gsub("%z+$", "") end
     if not ok or wx.wxString.FromUTF8(text) ~= ""
     or not invalidUTF8 or invalidLength ~= tdo:GetDataSize() then return self:Paste() end
 
@@ -751,6 +759,19 @@ function ide:CreateStyledTextCtrl(...)
   function editor:GetModifiedTime() return self.updated end
 
   function editor:SetupKeywords(...) return SetupKeywords(self, ...) end
+
+  -- this is a workaround for the auto-complete popup showing large font
+  -- when Settechnology(1) is used to enable DirectWrite support.
+  -- See https://trac.wxwidgets.org/ticket/17804#comment:32
+  for _, method in ipairs({"AutoCompShow", "UserListShow"}) do
+    local orig = editor[method]
+    editor[method] = function (editor, ...)
+      local tech = editor:GetTechnology()
+      if tech ~= 0 then editor:SetTechnology(0) end
+      orig(editor, ...)
+      if tech ~= 0 then editor:SetTechnology(tech) end
+    end
+  end
 
   editor:Connect(wx.wxEVT_KEY_DOWN,
     function (event)
