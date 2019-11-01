@@ -20,7 +20,6 @@ out:SetFont(ide:CreateFont(config.fontsize or 10, wx.wxFONTFAMILY_MODERN, wx.wxF
   config.fontencoding or wx.wxFONTENCODING_DEFAULT)
 )
 out:StyleSetFont(wxstc.wxSTC_STYLE_DEFAULT, out:GetFont())
-out:SetBufferedDraw(not ide.config.hidpi and true or false)
 out:StyleClearAll()
 out:SetMarginWidth(1, 16) -- marker margin
 out:SetMarginType(1, wxstc.wxSTC_MARGIN_SYMBOL)
@@ -382,6 +381,9 @@ out:Connect(wx.wxEVT_END_PROCESS, function(event)
         DisplayOutputLn(TR("Program completed in %.2f seconds (pid: %d).")
           :format(ide:GetTime() - customprocs[pid].started, pid))
       end
+      -- this protects against the object referenced in wxProcess being collected
+      -- before the wxProcess itself is collected, which may cause a crash on exit
+      if customprocs[pid].proc then customprocs[pid].proc:Detach() end
       customprocs[pid] = nil
     end
   end)

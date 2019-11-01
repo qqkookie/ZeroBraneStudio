@@ -710,7 +710,6 @@ function CreateEditor(bare)
     end
   end
 
-  editor:SetBufferedDraw(not ide.config.hidpi and true or false)
   editor:StyleClearAll()
 
   editorfont = editorfont or ide:CreateFont(edcfg.fontsize or 10, wx.wxFONTFAMILY_MODERN,
@@ -758,15 +757,16 @@ function CreateEditor(bare)
 
   editor:SetVisiblePolicy(wxstc.wxSTC_VISIBLE_STRICT, 3)
 
+  local charwidth = editor:TextWidth(wxstc.wxSTC_STYLE_DEFAULT, "8")
   editor:SetMarginType(margin.LINENUMBER, wxstc.wxSTC_MARGIN_NUMBER)
   editor:SetMarginMask(margin.LINENUMBER, 0)
   editor:SetMarginWidth(margin.LINENUMBER,
-    edcfg.linenumber and math.floor(linenumlen * editor:TextWidth(wxstc.wxSTC_STYLE_DEFAULT, "8")) or 0)
+    edcfg.linenumber and math.floor(linenumlen * charwidth) or 0)
 
   editor:SetMarginType(margin.MARKER, wxstc.wxSTC_MARGIN_SYMBOL)
   editor:SetMarginMask(margin.MARKER, 0xffffffff - wxstc.wxSTC_MASK_FOLDERS)
   editor:SetMarginSensitive(margin.MARKER, true)
-  editor:SetMarginWidth(margin.MARKER, 18)
+  editor:SetMarginWidth(margin.MARKER, charwidth*1.8)
 
   editor:MarkerDefine(StylesGetMarker("currentline"))
   editor:MarkerDefine(StylesGetMarker("breakpoint"))
@@ -776,11 +776,15 @@ function CreateEditor(bare)
     editor:SetMarginType(margin.FOLD, wxstc.wxSTC_MARGIN_SYMBOL)
     editor:SetMarginMask(margin.FOLD, wxstc.wxSTC_MASK_FOLDERS)
     editor:SetMarginSensitive(margin.FOLD, true)
-    editor:SetMarginWidth(margin.FOLD, 18)
+    editor:SetMarginWidth(margin.FOLD, charwidth*1.8)
   end
 
   editor:SetFoldFlags(tonumber(edcfg.foldflags) or wxstc.wxSTC_FOLDFLAG_LINEAFTER_CONTRACTED)
   editor:SetBackSpaceUnIndents(edcfg.backspaceunindent and 1 or 0)
+
+  if ide.wxver >= "3.0" and edcfg.showligatures then
+    editor:SetTechnology(1) -- enable DirectWrite support on Windows
+  end
 
   if ide.wxver >= "2.9.5" then
     -- allow multiple selection and multi-cursor editing if supported
@@ -1242,17 +1246,22 @@ function CreateEditor(bare)
   -- brackets or backspace is used (very slow screen repaint with 0.5s delay).
   -- Moving it to PAINTED event creates problems on OSX (using wx2.9.5+),
   -- where refresh of R/W and R/O status in the status bar is delayed.
+  -- To avoid this macOS issue and a observed crash on Linux (wx3.1.2+) the
+  -- execution of the update is delayed till after the event is completed.
+  -- See https://github.com/pkulchenko/wxlua/issues/5 for the related discussion.
+  -- PAINTED is better than UPDATEUI, as it handles INS vs OVR and R/O vs R/W status.
   editor:Connect(wxstc.wxEVT_STC_PAINTED,
     function (event)
       PackageEventHandle("onEditorPainted", editor, event)
 
-      if ide.osname == 'Windows' then
-        -- STC_PAINTED is called on multiple editors when they point to
-        -- the same document; only update status for the active one
-        if notebook:GetSelection() == notebook:GetPageIndex(editor) then
-          updateStatusText(editor)
-        end
+      -- STC_PAINTED is called on multiple editors when they point to
+      -- the same document; only update status for the active one
+      local doc = ide:GetDocument(editor)
+      if doc and doc:IsActive() then
+        editor:DoWhenIdle(function() updateStatusText(editor) end)
+      end
 
+      if ide.osname == 'Windows' then
         if edcfg.usewrap ~= true and editor:AutoCompActive() then
           -- showing auto-complete list leaves artifacts on the screen,
           -- which can only be fixed by a forced refresh.
@@ -1291,8 +1300,6 @@ function CreateEditor(bare)
       editor.processedUpdateContent = editor.processedUpdateContent + 1
 
       PackageEventHandle("onEditorUpdateUI", editor, event)
-
-      if ide.osname ~= 'Windows' then updateStatusText(editor) end
 
       editor:GotoPosDelayed()
       updateBraceMatch(editor)

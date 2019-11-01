@@ -145,6 +145,11 @@ local function showCommandBar(params)
     local size = results:GetVirtualSize()
     local w,h = size:GetWidth(),size:GetHeight()
     local bitmap = wx.wxBitmap(w,h)
+    local scale = ide:GetContentScaleFactor()
+    -- scale the bitmap before drawing
+    if ide:IsValidProperty(bitmap, "CreateScaled") and scale > 1 then
+      bitmap:CreateScaled(w, h, bitmap:GetDepth(), scale)
+    end
     dc:SelectObject(bitmap)
 
     -- clear the background
@@ -322,7 +327,6 @@ local function showCommandBar(params)
   results:Connect(wx.wxEVT_LEFT_DOWN, onMouseLeftDown)
   results:Connect(wx.wxEVT_ERASE_BACKGROUND, function() end)
 
-  search:SetFocus()
   search:Connect(wx.wxEVT_KEY_DOWN, onKeyDown)
   search:Connect(wx.wxEVT_COMMAND_TEXT_UPDATED, onTextUpdated)
   search:Connect(wx.wxEVT_COMMAND_TEXT_ENTER, function() onExit(linenow) end)
@@ -337,6 +341,7 @@ local function showCommandBar(params)
 
   search:SetValue((defaultText or "")..(selectedText or ""))
   search:SetSelection(#(defaultText or ""), -1)
+  search:SetFocus()
 end
 
 local sep = "[/\\%-_ ]+"

@@ -105,12 +105,10 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
       if editor:GetLength() ~= expected then
         -- skip binary files with unknown extensions as they may have any sequences
         -- when using Raw methods, this can only happen for binary files (that include \0 chars)
-        if editor.useraw or editor.spec == ide.specs.none and IsBinary(s) then
-          ide:Print(("%s: %s"):format(filePath,
-              TR("Binary file is shown as read-only as it is only partially loaded.")))
+        if editor.spec == ide.specs.none and IsBinary(s) then
           file_text = ''
           editor:SetReadOnly(true)
-          return false
+          return false, "Failed to load binary file."
         end
 
         -- handle invalid UTF8 characters
@@ -165,7 +163,8 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
       or edcfg.usetabs and (file_text:find("%f[^\r\n] ") or file_text:find("^ ")) == nil)
   end
   
-  if (file_text and edcfg.checkeol) then
+  local isbinary = editor.spec == ide.specs.none and IsBinary(file_text)
+  if (file_text and edcfg.checkeol and not isbinary) then
     -- Auto-detect CRLF/LF line-endings
     local foundcrlf = string.find(file_text,"\r\n") ~= nil
     local foundlf = (string.find(file_text,"[^\r]\n") ~= nil)
@@ -182,6 +181,8 @@ function LoadFile(filePath, editor, file_must_exist, skipselection)
     -- else (e.g. file is 1 line long or uses another line-ending): use default EOL mode
     end
   end
+
+  if isbinary then editor:SetCaretStyle(wxstc.wxSTC_CARETSTYLE_BLOCK) end
 
   editor:EmptyUndoBuffer()
   local doc = ide:GetDocument(editor)
@@ -535,7 +536,8 @@ function SetOpenFiles(nametab,params)
     local editor = LoadFile(doc.filename,nil,true,true) -- skip selection
     if editor then editor:GotoPosDelayed(doc.cursorpos or 0) end
   end
-  local doc = ide:GetDocument(notebook:GetPage(params and params.index or 0))
+  local idx = params and params.index or 0
+  local doc = idx < notebook:GetPageCount() and ide:GetDocument(notebook:GetPage(idx))
   if doc then doc:SetActive() end
 end
 

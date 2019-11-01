@@ -22,6 +22,7 @@ return {
     indentguide = true,
     linecopy = true,
     linenumber = true,
+    ligatures = false,
     modifiedprefix = "✱ ", -- U+2731 \xe2\x9c\xb1 HEAVY ASTERISK
     nomousezoom = false,
     saveallonrun = false,
@@ -314,14 +315,13 @@ return {
   filehistorylength = 20,
   projecthistorylength = 20,
   commandlinehistorylength = 10,
-  bordersize = 3,
+  bordersize = 2,
   savebak = false,
   singleinstance = false,
   singleinstanceport = 8172,
   showmemoryusage = false,
   showhiddenfiles = false,
   transparency = nil, -- main window transparency: 0 == invisible -> 255 == opaque
-  hidpi = false, -- HiDPI/Retina display support
   hotexit = false,
   imagetint = false,
   markertint = true,
