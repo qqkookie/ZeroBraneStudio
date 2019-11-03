@@ -284,7 +284,7 @@ function FileWrite(file, content)
   local _ = wx.wxLogNull() -- disable error reporting; will report as needed
 
   if not wx.wxFileExists(file)
-  and not wx.wxFileName(file):Mkdir(tonumber(755,8), wx.wxPATH_MKDIR_FULL) then
+  and not wx.wxFileName(file):Mkdir(tonumber("755",8), wx.wxPATH_MKDIR_FULL) then
     return nil, wx.wxSysErrorMsg()
   end
 
@@ -506,6 +506,7 @@ function LoadLuaConfig(filename,isstring)
   -- if it's marked as command, but exists as a file, load it as a file
   if isstring and wx.wxFileExists(filename) then isstring = false end
 
+  local loadstring = loadstring or load
   local cfgfn, err, msg
   if isstring
   then msg, cfgfn, err = "string", loadstring(filename)
@@ -526,6 +527,7 @@ function LoadLuaConfig(filename,isstring)
 end
 
 function LoadSafe(data)
+  local loadstring = loadstring or load
   local f, res = loadstring(data)
   if not f then return f, res end
 
